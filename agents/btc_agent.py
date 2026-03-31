@@ -38,6 +38,7 @@ import websockets
 from websockets.exceptions import ConnectionClosedError, WebSocketException
 
 import config
+from core.market_scanner import MarketScanner, Market
 
 logger = logging.getLogger(__name__)
 
@@ -92,16 +93,21 @@ class BTCAgent:
         re.compile(r"(?:above|exceed|over|reach|hit)\s+\$?([0-9,]+(?:\.[0-9]+)?)[kK]?", re.IGNORECASE),
     ]
 
+    # How often to refresh BTC market list from MarketScanner (seconds)
+    _MARKET_REFRESH_INTERVAL = 15 * 60  # 15 minutes
+
     def __init__(
         self,
         clob_client: Any = None,
         signal_callback: Optional[Callable[[Signal], Any]] = None,
         dry_run: bool = config.DRY_RUN,
         price_history_seconds: int = 60,
+        market_scanner: Optional[MarketScanner] = None,
     ):
         self.clob_client = clob_client
         self.signal_callback = signal_callback
         self.dry_run = dry_run
+        self.market_scanner = market_scanner
 
         # Rolling price window
         self._price_history: deque[tuple[float, float]] = deque()  # (timestamp, price)
@@ -114,12 +120,14 @@ class BTCAgent:
         self._ws_connected: bool = False
         self._connect_attempts: int = 0
         self._last_market_scan: float = 0.0
+        self._last_scanner_refresh: float = 0.0
         self._btc_markets: list[dict] = []
 
         logger.info(
-            "BTCAgent initialised | dry_run=%s | ws_url=%s",
+            "BTCAgent initialised | dry_run=%s | ws_url=%s | market_scanner=%s",
             self.dry_run,
             config.BINANCE_WS_URL,
+            "provided" if market_scanner else "none (fallback to CLOB)",
         )
 
     # ------------------------------------------------------------------
@@ -226,9 +234,45 @@ class BTCAgent:
     # ------------------------------------------------------------------
 
     async def _refresh_btc_markets(self) -> None:
-        """Fetch BTC-related markets from Polymarket via CLOBClient."""
+        """
+        Fetch BTC-related markets from MarketScanner (preferred) or CLOBClient fallback.
+
+        MarketScanner provides pre-filtered, categorized markets.
+        Refreshed from scanner every _MARKET_REFRESH_INTERVAL seconds.
+        Falls back to direct CLOB call if scanner not available.
+        """
+        now = time.time()
+
+        # Use MarketScanner if available
+        if self.market_scanner is not None:
+            # Only re-query the scanner if interval has elapsed
+            if now - self._last_scanner_refresh >= self._MARKET_REFRESH_INTERVAL:
+                self._last_scanner_refresh = now
+                try:
+                    scanner_markets = self.market_scanner.get_markets(category="btc")
+                    # Convert Market objects to dicts for compatibility
+                    self._btc_markets = [m.raw if m.raw else m.to_dict() for m in scanner_markets]
+                    if scanner_markets:
+                        logger.info(
+                            "BTCAgent: refreshed %d BTC markets from MarketScanner "
+                            "(liquidity-filtered, spread-filtered)",
+                            len(scanner_markets),
+                        )
+                    else:
+                        logger.warning(
+                            "BTCAgent: MarketScanner returned 0 BTC markets — "
+                            "no signals will be generated until next refresh"
+                        )
+                    return
+                except Exception as exc:
+                    logger.error("BTCAgent: MarketScanner refresh error: %s", exc)
+            else:
+                # Still within refresh interval — use cached list
+                return
+
+        # Fallback: fetch directly via CLOB client
         if self.clob_client is None:
-            logger.debug("No CLOB client — skipping market refresh")
+            logger.debug("No CLOB client and no market_scanner — skipping market refresh")
             return
 
         try:
@@ -243,12 +287,12 @@ class BTCAgent:
                 if self._is_btc_market(m)
             ]
             logger.info(
-                "Found %d BTC markets (from %d total)",
+                "BTCAgent: found %d BTC markets via CLOB (from %d total)",
                 len(self._btc_markets),
                 len(all_markets),
             )
         except Exception as exc:
-            logger.error("Failed to refresh BTC markets: %s", exc)
+            logger.error("BTCAgent: Failed to refresh BTC markets: %s", exc)
 
     def _is_btc_market(self, market: dict) -> bool:
         """Return True if the market question is about BTC price."""
@@ -263,6 +307,12 @@ class BTCAgent:
             return
 
         await self._refresh_btc_markets()
+
+        if not self._btc_markets:
+            logger.info(
+                "BTCAgent: no BTC markets available (scanner empty or not yet refreshed)"
+            )
+            return
 
         for market in self._btc_markets:
             signal = self._evaluate_market(market)
@@ -292,8 +342,12 @@ class BTCAgent:
 
         Returns None if the market can't be parsed or has no edge.
         """
-        question = market.get("question", "")
-        market_id = market.get("condition_id", market.get("id", "unknown"))
+        question = market.get("question", market.get("title", ""))
+        market_id = (
+            market.get("conditionId")
+            or market.get("condition_id")
+            or market.get("id", "unknown")
+        )
 
         # Parse threshold price from question
         threshold = self._parse_threshold(question)

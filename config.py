@@ -83,6 +83,24 @@ MIN_TIME_TO_EXPIRY_HOURS: int = 2       # Don't trade markets expiring within 2h
 MAX_TIME_TO_EXPIRY_DAYS: int = 30       # Don't trade far-future markets
 
 # ---------------------------------------------------------------------------
+# 5b. Market Filtering (updated thresholds)
+# ---------------------------------------------------------------------------
+
+MIN_LIQUIDITY: float = 100_000          # NegRisk: minimum liquidity per market leg
+MIN_PROBABILITY: float = 0.15           # Don't trade below 15% probability
+MAX_PROBABILITY: float = 0.85           # Don't trade above 85% probability
+
+# ---------------------------------------------------------------------------
+# 5c. NegRisk Arbitrage Parameters
+# ---------------------------------------------------------------------------
+
+NEGRISK_ENABLED: bool = os.getenv("NEGRISK_ENABLED", "True").lower() != "false"
+NEGRISK_MIN_EDGE: float = float(os.getenv("NEGRISK_MIN_EDGE", "0.03"))       # 3% minimum edge after fees
+NEGRISK_MIN_LIQUIDITY: float = float(os.getenv("NEGRISK_MIN_LIQUIDITY", "100000"))  # $100k per leg
+NEGRISK_MAX_POSITION_PCT: float = float(os.getenv("NEGRISK_MAX_POSITION_PCT", "0.05"))  # 5% of portfolio max per arb
+NEGRISK_SCAN_INTERVAL: int = int(os.getenv("NEGRISK_SCAN_INTERVAL", "60"))   # Scan every 60s
+
+# ---------------------------------------------------------------------------
 # 6. Agent Enable / Disable Flags
 # ---------------------------------------------------------------------------
 
@@ -198,6 +216,8 @@ def validate_config() -> dict:
 def get_config_summary() -> str:
     """Return a human-readable config summary with no sensitive values."""
     enabled_agents = []
+    if NEGRISK_ENABLED:
+        enabled_agents.append("negrisk")
     if AGENT_BTC_ENABLED:
         enabled_agents.append("btc")
     if AGENT_WEATHER_ENABLED:
