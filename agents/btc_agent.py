@@ -233,7 +233,11 @@ class BTCAgent:
 
         try:
             result = await self.clob_client.get_markets(limit=200)
-            all_markets = result.get("data", [])
+            # Gamma API may return a list directly or {"data": [...]}
+            if isinstance(result, list):
+                all_markets = result
+            else:
+                all_markets = result.get("data", [])
             self._btc_markets = [
                 m for m in all_markets
                 if self._is_btc_market(m)

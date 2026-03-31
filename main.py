@@ -311,6 +311,9 @@ class PolymarketBot:
         if self.alerter:
             await self.alerter.close()
 
+        # Allow aiohttp sessions a moment to close cleanly
+        await asyncio.sleep(0.25)
+
         uptime = time.time() - self._start_time
         logger.info("Bot stopped | uptime=%.0fs | reason=%s", uptime, reason)
 
