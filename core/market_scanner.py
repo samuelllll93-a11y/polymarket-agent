@@ -184,6 +184,7 @@ class MarketScanner:
         self,
         limit: int = 100,
         batch_size: int = 5,
+        batch_delay: float = 0.3,
     ) -> list[dict]:
         """
         Fetch all active markets using concurrent paginated requests.
@@ -247,14 +248,16 @@ class MarketScanner:
                 break
 
             offset += batch_size * limit
+            # Brief pause between batches to respect API rate limits
+            await asyncio.sleep(batch_delay)
 
         elapsed = time.monotonic() - t_start
         logger.info(
-            "MarketScanner: Fetched %d markets in %.1fs (%d concurrent, batch=%d)",
+            "MarketScanner: Fetched %d markets in %.1fs (batch=%d, delay=%.1fs)",
             len(all_raw),
             elapsed,
-            min(batch_size, (len(all_raw) // limit) + 1),
             batch_size,
+            batch_delay,
         )
         return all_raw
 
