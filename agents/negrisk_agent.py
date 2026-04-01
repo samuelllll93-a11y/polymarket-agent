@@ -150,6 +150,7 @@ class NegRiskAgent:
             params = {
                 "active": "true",
                 "closed": "false",
+                "negRisk": "true",   # Only fetch true NegRisk multi-outcome markets
                 "limit": limit,
                 "offset": offset,
             }
@@ -207,6 +208,12 @@ class NegRiskAgent:
         signals: list[ArbSignal] = []
 
         for event in events:
+            # Skip events not flagged as NegRisk (defence against API returning
+            # non-NegRisk events despite the negRisk=true query param)
+            if not event.get("negRisk", False):
+                logger.debug("NegRisk skip (negRisk!=true): %s", event.get("title", ""))
+                continue
+
             markets = event.get("markets", [])
             if len(markets) < 2:
                 continue  # Need at least 2 outcomes for NegRisk

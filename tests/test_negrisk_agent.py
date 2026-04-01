@@ -35,9 +35,9 @@ def make_market(condition_id: str, yes_price: float, liquidity: float = 500_000)
     }
 
 
-def make_event(title: str, markets: list[dict], event_id: str = "evt1") -> dict:
+def make_event(title: str, markets: list[dict], event_id: str = "evt1", neg_risk: bool = True) -> dict:
     """Helper to create a minimal Gamma-style event dict."""
-    return {"id": event_id, "title": title, "markets": markets}
+    return {"id": event_id, "title": title, "markets": markets, "negRisk": neg_risk}
 
 
 @pytest.fixture
@@ -279,3 +279,18 @@ def test_multiple_events_multiple_signals(agent):
     signals = agent.find_arb_opportunities(events)
     # Event A: YES arb, Event B: NO arb, Event C: skipped
     assert len(signals) == 2
+
+
+# ---------------------------------------------------------------------------
+# Test 11: negRisk=false events are filtered out (false positive fix)
+# ---------------------------------------------------------------------------
+
+def test_non_negrisk_event_filtered(agent):
+    """Events without negRisk=True must be skipped regardless of price sums."""
+    events = [make_event("Non-NegRisk Market", [
+        make_market("cid_A", 0.20),
+        make_market("cid_B", 0.20),
+        make_market("cid_C", 0.20),
+    ], neg_risk=False)]
+    signals = agent.find_arb_opportunities(events)
+    assert len(signals) == 0
