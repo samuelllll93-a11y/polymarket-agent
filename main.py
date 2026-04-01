@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import config
-from config import validate_config, get_config_summary
+from config import validate_config, get_config_summary, log_credential_health_check
 from utils.logger import setup_logging
 from core.clob_client import CLOBClient
 from core.risk_manager import RiskManager, Position
@@ -239,6 +239,9 @@ class PolymarketBot:
         self._start_time = time.time()
         logger.info("=== Polymarket Bot Starting ===")
         logger.info(get_config_summary())
+
+        # Credential health check — key names only, never values
+        log_credential_health_check()
 
         # Validate config
         result = validate_config()

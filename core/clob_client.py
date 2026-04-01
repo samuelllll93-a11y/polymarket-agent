@@ -136,7 +136,13 @@ class CLOBClient:
         )
 
         if self.dry_run:
-            logger.info("CLOBClient connected (DRY_RUN — no auth)")
+            if not self._api_key:
+                logger.info(
+                    "CLOBClient: CLOB credentials not configured — "
+                    "order placement disabled (DRY_RUN mode)"
+                )
+            else:
+                logger.info("CLOBClient connected (DRY_RUN — auth skipped)")
             self._connected = True
             return
 

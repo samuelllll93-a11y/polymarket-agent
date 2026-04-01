@@ -145,6 +145,12 @@ TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 NEWS_API_KEY: str = os.getenv("NEWS_API_KEY", "")
 ODDS_API_KEY: str = os.getenv("ODDS_API_KEY", "")
+ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+
+# Alchemy / Polygon RPC — falls back to public endpoint if not set
+_ALCHEMY_RPC_URL: str = os.getenv("ALCHEMY_RPC_URL", "")
+POLYGON_RPC_URL: str = _ALCHEMY_RPC_URL or "https://polygon-rpc.com"
+ALCHEMY_RPC_CONFIGURED: bool = bool(_ALCHEMY_RPC_URL)
 
 # ---------------------------------------------------------------------------
 # 8. Timing Intervals (seconds unless noted)
@@ -272,3 +278,70 @@ def get_config_summary() -> str:
         f"  Telegram         : {telegram_status}\n"
         f"============================="
     )
+
+
+# ---------------------------------------------------------------------------
+# 13. Credential Health Check (key names only — never values)
+# ---------------------------------------------------------------------------
+
+def credential_health_check() -> list[tuple[str, str]]:
+    """
+    Return a table of credentials and their status for startup logging.
+
+    Each entry is (key_name, status_string) where status is one of:
+      PRESENT  — credential is set and non-empty
+      MISSING — credential not set; fallback or degraded mode active
+      FALLBACK — credential absent but a safe fallback is in use
+
+    Never logs or returns actual credential values.
+    """
+    rows: list[tuple[str, str]] = []
+
+    def _status(val: str, fallback_label: str = "") -> str:
+        if val:
+            return "PRESENT"
+        return f"MISSING — {fallback_label}" if fallback_label else "MISSING"
+
+    rows.append((
+        "POLY_API_KEY",
+        _status(POLY_API_KEY, "DRY_RUN forced — no live orders"),
+    ))
+    rows.append((
+        "POLY_API_SECRET",
+        _status(POLY_API_SECRET, "DRY_RUN forced — no live orders"),
+    ))
+    rows.append((
+        "ANTHROPIC_API_KEY",
+        _status(ANTHROPIC_API_KEY, "PoliticsAgent uses keyword heuristic"),
+    ))
+    rows.append((
+        "NEWS_API_KEY",
+        _status(NEWS_API_KEY, "PoliticsAgent uses keyword heuristic"),
+    ))
+    rows.append((
+        "ODDS_API_KEY",
+        _status(ODDS_API_KEY, "SportsAgent disabled"),
+    ))
+    rows.append((
+        "TELEGRAM_BOT_TOKEN",
+        _status(TELEGRAM_BOT_TOKEN, "alerts logged to console"),
+    ))
+    rows.append((
+        "TELEGRAM_CHAT_ID",
+        _status(TELEGRAM_CHAT_ID, "alerts logged to console"),
+    ))
+    if ALCHEMY_RPC_CONFIGURED:
+        rows.append(("ALCHEMY_RPC_URL", "PRESENT"))
+    else:
+        rows.append(("ALCHEMY_RPC_URL", "MISSING — using public Polygon RPC fallback"))
+
+    return rows
+
+
+def log_credential_health_check() -> None:
+    """Log the credential health check table to stdout."""
+    _logger = logging.getLogger(__name__)
+    rows = credential_health_check()
+    _logger.info("[CREDENTIALS] Startup credential status:")
+    for key, status in rows:
+        _logger.info("[CREDENTIALS] %-26s: %s", key, status)
