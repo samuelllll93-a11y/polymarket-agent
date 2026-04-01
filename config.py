@@ -101,6 +101,34 @@ NEGRISK_MAX_POSITION_PCT: float = float(os.getenv("NEGRISK_MAX_POSITION_PCT", "0
 NEGRISK_SCAN_INTERVAL: int = int(os.getenv("NEGRISK_SCAN_INTERVAL", "60"))   # Scan every 60s
 
 # ---------------------------------------------------------------------------
+# 5b. Weather Agent Settings
+# ---------------------------------------------------------------------------
+
+WEATHER_SCAN_INTERVAL: int = int(os.getenv("WEATHER_SCAN_INTERVAL", "300"))  # Scan every 5 min
+WEATHER_MIN_EDGE: float = float(os.getenv("WEATHER_MIN_EDGE", "0.05"))       # 5% edge threshold
+WEATHER_MIN_LIQUIDITY: float = float(os.getenv("WEATHER_MIN_LIQUIDITY", "5000"))  # $5k min liquidity
+
+# NOAA gridpoint locations for major US cities
+# Format: (office, grid_x, grid_y)
+# Find yours at: https://api.weather.gov/points/{lat},{lon}
+NOAA_LOCATIONS: dict = {
+    "NYC":     ("OKX", 33, 35),
+    "LA":      ("LOX", 149, 48),
+    "Chicago": ("LOT", 74, 73),
+    "Miami":   ("MFL", 110, 44),
+    "Denver":  ("BOU", 57, 62),
+}
+
+# ---------------------------------------------------------------------------
+# 5c. Politics Agent Settings
+# ---------------------------------------------------------------------------
+
+POLITICS_SCAN_INTERVAL: int = int(os.getenv("POLITICS_SCAN_INTERVAL", "600"))  # Scan every 10 min
+POLITICS_MIN_EDGE: float = float(os.getenv("POLITICS_MIN_EDGE", "0.06"))        # 6% edge threshold
+POLITICS_MIN_LIQUIDITY: float = float(os.getenv("POLITICS_MIN_LIQUIDITY", "10000"))  # $10k min
+POLITICS_HEADLINES_COUNT: int = int(os.getenv("POLITICS_HEADLINES_COUNT", "10"))
+
+# ---------------------------------------------------------------------------
 # 6. Agent Enable / Disable Flags
 # ---------------------------------------------------------------------------
 
