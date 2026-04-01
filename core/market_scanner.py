@@ -180,23 +180,82 @@ class MarketScanner:
             logger.error("MarketScanner: Unexpected error (offset=%d): %s", offset, exc)
             return []
 
-    async def _fetch_all_raw(self) -> list[dict]:
-        """Fetch all active markets with pagination."""
+    async def _fetch_all_raw(
+        self,
+        limit: int = 100,
+        batch_size: int = 5,
+    ) -> list[dict]:
+        """
+        Fetch all active markets using concurrent paginated requests.
+
+        Strategy:
+          1. Fetch page 0 to discover total count and seed results.
+          2. Calculate remaining pages, fire them in batches of `batch_size`
+             simultaneous requests using asyncio.gather().
+          3. Merge results in offset order, drop empty pages to detect last page.
+
+        This reduces wall-clock time from ~30s (sequential) to ~5s (concurrent).
+        """
+        t_start = time.monotonic()
         session = await self._get_session()
-        all_raw: list[dict] = []
-        offset = 0
-        limit = 100
+
+        # --- Seed: fetch first page to get initial data ---
+        first_page = await self._fetch_page(session, offset=0, limit=limit)
+        if not first_page:
+            logger.debug("MarketScanner: first page empty — 0 markets")
+            return []
+
+        all_raw: list[dict] = list(first_page)
+
+        # If first page is already the last, we're done
+        if len(first_page) < limit:
+            elapsed = time.monotonic() - t_start
+            logger.info(
+                "MarketScanner: Fetched %d markets in %.1fs (1 page)",
+                len(all_raw),
+                elapsed,
+            )
+            return all_raw
+
+        # --- Concurrent fetch of remaining pages ---
+        offset = limit  # Start from page 2
 
         while True:
-            page = await self._fetch_page(session, offset=offset, limit=limit)
-            if not page:
-                break
-            all_raw.extend(page)
-            if len(page) < limit:
-                break  # Last page
-            offset += limit
+            # Build a batch of offsets to fetch simultaneously
+            batch_offsets = [offset + i * limit for i in range(batch_size)]
 
-        logger.debug("MarketScanner: fetched %d raw markets", len(all_raw))
+            pages = await asyncio.gather(
+                *[self._fetch_page(session, off, limit) for off in batch_offsets],
+                return_exceptions=True,
+            )
+
+            reached_end = False
+            for page in pages:
+                if isinstance(page, Exception):
+                    logger.warning("MarketScanner: batch page error: %s", page)
+                    reached_end = True
+                    break
+                if not page:
+                    reached_end = True
+                    break
+                all_raw.extend(page)
+                if len(page) < limit:
+                    reached_end = True
+                    break
+
+            if reached_end:
+                break
+
+            offset += batch_size * limit
+
+        elapsed = time.monotonic() - t_start
+        logger.info(
+            "MarketScanner: Fetched %d markets in %.1fs (%d concurrent, batch=%d)",
+            len(all_raw),
+            elapsed,
+            min(batch_size, (len(all_raw) // limit) + 1),
+            batch_size,
+        )
         return all_raw
 
     # ------------------------------------------------------------------

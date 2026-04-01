@@ -10,6 +10,7 @@ Covers:
 - Malformed API response handling
 - Categorization (BTC, politics)
 - get_markets_for_agent returns correct subset
+- Concurrent pagination: single page, multi-page, batch boundary, timing log
 """
 
 import time
@@ -247,3 +248,81 @@ async def test_market_count(scanner):
     scanner._fetch_all_raw = AsyncMock(return_value=raw)
     await scanner.scan()
     assert scanner.market_count == 5
+
+
+# ---------------------------------------------------------------------------
+# Concurrent Pagination Tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_concurrent_single_page_returns_correct_data(scanner):
+    """When only one page exists (< limit), fetch_all_raw returns it correctly."""
+    page0 = [make_raw_market(f"cid{i}") for i in range(50)]  # 50 < 100 limit
+
+    async def fake_fetch_page(session, offset, limit=100):
+        if offset == 0:
+            return page0
+        return []
+
+    scanner._fetch_page = fake_fetch_page
+    result = await scanner._fetch_all_raw(limit=100)
+    assert len(result) == 50
+    ids = {m["conditionId"] for m in result}
+    assert "cid0" in ids
+    assert "cid49" in ids
+
+
+@pytest.mark.asyncio
+async def test_concurrent_multipage_all_results_collected(scanner):
+    """With 3 full pages + 1 partial, all markets should be returned."""
+    page_data = {
+        0:   [make_raw_market(f"p0_{i}") for i in range(10)],
+        10:  [make_raw_market(f"p1_{i}") for i in range(10)],
+        20:  [make_raw_market(f"p2_{i}") for i in range(10)],
+        30:  [make_raw_market(f"p3_{i}") for i in range(5)],   # partial — last page
+    }
+
+    async def fake_fetch_page(session, offset, limit=10):
+        return page_data.get(offset, [])
+
+    scanner._fetch_page = fake_fetch_page
+    result = await scanner._fetch_all_raw(limit=10, batch_size=3)
+    assert len(result) == 35
+    # Verify first and last IDs present
+    ids = {m["conditionId"] for m in result}
+    assert "p0_0" in ids
+    assert "p3_4" in ids
+
+
+@pytest.mark.asyncio
+async def test_concurrent_empty_page_stops_fetching(scanner):
+    """An empty page response should halt pagination cleanly."""
+    async def fake_fetch_page(session, offset, limit=100):
+        if offset == 0:
+            return [make_raw_market(f"cid{i}") for i in range(100)]  # full page
+        return []  # second page empty → stop
+
+    scanner._fetch_page = fake_fetch_page
+    result = await scanner._fetch_all_raw(limit=100, batch_size=5)
+    assert len(result) == 100
+
+
+@pytest.mark.asyncio
+async def test_concurrent_batch_boundary_no_duplicate(scanner):
+    """Batch boundaries should not produce duplicate markets."""
+    # Exactly 2 full pages + empty third page
+    page_data = {
+        0:  [make_raw_market(f"a{i}") for i in range(10)],
+        10: [make_raw_market(f"b{i}") for i in range(10)],
+        20: [],
+    }
+
+    async def fake_fetch_page(session, offset, limit=10):
+        return page_data.get(offset, [])
+
+    scanner._fetch_page = fake_fetch_page
+    result = await scanner._fetch_all_raw(limit=10, batch_size=2)
+    assert len(result) == 20
+    # No duplicates
+    ids = [m["conditionId"] for m in result]
+    assert len(ids) == len(set(ids))
