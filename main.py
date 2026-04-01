@@ -45,6 +45,8 @@ from core.market_scanner import MarketScanner
 from core.order_manager import OrderManager
 from agents.btc_agent import BTCAgent, Signal
 from agents.negrisk_agent import NegRiskAgent, ArbSignal
+from agents.weather_agent import WeatherAgent
+from agents.politics_agent import PoliticsAgent
 from utils.telegram_alerts import TelegramAlerter
 
 logger = logging.getLogger(__name__)
@@ -225,6 +227,8 @@ class PolymarketBot:
         self.router: Optional[SignalRouter] = None
         self.btc_agent: Optional[BTCAgent] = None
         self.negrisk_agent: Optional[NegRiskAgent] = None
+        self.weather_agent: Optional[WeatherAgent] = None
+        self.politics_agent: Optional[PoliticsAgent] = None
 
     # ------------------------------------------------------------------
     # Startup
@@ -314,6 +318,28 @@ class PolymarketBot:
             )
             enabled_agents.append("btc")
 
+        # Weather agent
+        if config.AGENT_WEATHER_ENABLED:
+            self.weather_agent = WeatherAgent(
+                market_scanner=self.market_scanner,
+                signal_callback=self.router.handle_signal,
+                dry_run=self.dry_run,
+                portfolio_value=config.TOTAL_CAPITAL_USD,
+            )
+            enabled_agents.append("weather")
+            logger.info("Weather agent: ENABLED")
+
+        # Politics agent
+        if config.AGENT_POLITICS_ENABLED:
+            self.politics_agent = PoliticsAgent(
+                market_scanner=self.market_scanner,
+                signal_callback=self.router.handle_signal,
+                dry_run=self.dry_run,
+                portfolio_value=config.TOTAL_CAPITAL_USD,
+            )
+            enabled_agents.append("politics")
+            logger.info("Politics agent: ENABLED")
+
         # Startup alert
         await self.alerter.send_startup(enabled_agents)
 
@@ -326,6 +352,16 @@ class PolymarketBot:
         if self.btc_agent:
             self._tasks.append(
                 asyncio.create_task(self.btc_agent.run(), name="btc_agent")
+            )
+
+        if self.weather_agent:
+            self._tasks.append(
+                asyncio.create_task(self.weather_agent.run(), name="weather_agent")
+            )
+
+        if self.politics_agent:
+            self._tasks.append(
+                asyncio.create_task(self.politics_agent.run(), name="politics_agent")
             )
 
         # MarketScanner background refresh
@@ -410,6 +446,10 @@ class PolymarketBot:
             await self.btc_agent.stop()
         if self.negrisk_agent:
             await self.negrisk_agent.stop()
+        if self.weather_agent:
+            await self.weather_agent.stop()
+        if self.politics_agent:
+            await self.politics_agent.stop()
 
         # Cancel background tasks
         for task in self._tasks:
