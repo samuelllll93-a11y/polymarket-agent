@@ -47,6 +47,7 @@ from agents.btc_agent import BTCAgent, Signal
 from agents.negrisk_agent import NegRiskAgent, ArbSignal
 from agents.weather_agent import WeatherAgent
 from agents.politics_agent import PoliticsAgent
+from agents.sports_agent import SportsAgent
 from utils.telegram_alerts import TelegramAlerter
 
 logger = logging.getLogger(__name__)
@@ -229,6 +230,7 @@ class PolymarketBot:
         self.negrisk_agent: Optional[NegRiskAgent] = None
         self.weather_agent: Optional[WeatherAgent] = None
         self.politics_agent: Optional[PoliticsAgent] = None
+        self.sports_agent: Optional[SportsAgent] = None
 
     # ------------------------------------------------------------------
     # Startup
@@ -343,6 +345,20 @@ class PolymarketBot:
             enabled_agents.append("politics")
             logger.info("Politics agent: ENABLED")
 
+        # Sports agent (self-disables if ODDS_API_KEY absent)
+        if config.AGENT_SPORTS_ENABLED:
+            self.sports_agent = SportsAgent(
+                market_scanner=self.market_scanner,
+                signal_callback=self.router.handle_signal,
+                dry_run=self.dry_run,
+                portfolio_value=config.TOTAL_CAPITAL_USD,
+            )
+            if self.sports_agent._enabled:
+                enabled_agents.append("sports")
+                logger.info("Sports agent: ENABLED")
+            else:
+                logger.info("Sports agent: DISABLED (ODDS_API_KEY not set)")
+
         # Startup alert
         await self.alerter.send_startup(enabled_agents)
 
@@ -365,6 +381,11 @@ class PolymarketBot:
         if self.politics_agent:
             self._tasks.append(
                 asyncio.create_task(self.politics_agent.run(), name="politics_agent")
+            )
+
+        if self.sports_agent:
+            self._tasks.append(
+                asyncio.create_task(self.sports_agent.run(), name="sports_agent")
             )
 
         # MarketScanner background refresh
@@ -453,6 +474,8 @@ class PolymarketBot:
             await self.weather_agent.stop()
         if self.politics_agent:
             await self.politics_agent.stop()
+        if self.sports_agent:
+            await self.sports_agent.stop()
 
         # Cancel background tasks
         for task in self._tasks:
