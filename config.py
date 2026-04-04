@@ -80,7 +80,7 @@ MIN_LIQUIDITY_USD: float = 10_000       # Skip illiquid markets
 MAX_SPREAD_PCT: float = 0.05            # Skip markets with >5% spread
 MIN_MARKET_VOLUME_24H: float = 5_000    # Minimum 24h volume in USD
 MIN_TIME_TO_EXPIRY_HOURS: int = 2       # Don't trade markets expiring within 2h
-MAX_TIME_TO_EXPIRY_DAYS: int = 30       # Don't trade far-future markets
+MAX_TIME_TO_EXPIRY_DAYS: int = 180      # Don't trade far-future markets (6 months covers elections/geopolitics)
 
 # ---------------------------------------------------------------------------
 # 5b. Market Filtering (updated thresholds)
