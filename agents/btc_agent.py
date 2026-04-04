@@ -399,12 +399,9 @@ class BTCAgent:
             gap_pct = abs(threshold - self._latest_price) / self._latest_price * 100
             if gap_pct > 20.0:
                 logger.info(
-                    "[BTC] Skipping %s — threshold $%,.0f too far from current "
-                    "price $%,.0f (gap: %.0f%%)",
-                    market_id[:16],
-                    threshold,
-                    self._latest_price,
-                    gap_pct,
+                    f"[BTC] Skipping {market_id[:16]} — threshold ${threshold:,.0f} "
+                    f"too far from current price ${self._latest_price:,.0f} "
+                    f"(gap: {gap_pct:.0f}%)"
                 )
                 return None
 
