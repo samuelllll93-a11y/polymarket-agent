@@ -133,9 +133,9 @@ POLITICS_HEADLINES_COUNT: int = int(os.getenv("POLITICS_HEADLINES_COUNT", "10"))
 # ---------------------------------------------------------------------------
 
 AGENT_BTC_ENABLED: bool = os.getenv("AGENT_BTC_ENABLED", "True").lower() != "false"
-AGENT_WEATHER_ENABLED: bool = os.getenv("AGENT_WEATHER_ENABLED", "False").lower() != "false"
-AGENT_POLITICS_ENABLED: bool = os.getenv("AGENT_POLITICS_ENABLED", "False").lower() != "false"
-AGENT_SPORTS_ENABLED: bool = os.getenv("AGENT_SPORTS_ENABLED", "False").lower() != "false"
+AGENT_WEATHER_ENABLED: bool = os.getenv("AGENT_WEATHER_ENABLED", "True").lower() != "false"
+AGENT_POLITICS_ENABLED: bool = os.getenv("AGENT_POLITICS_ENABLED", "True").lower() != "false"
+AGENT_SPORTS_ENABLED: bool = os.getenv("AGENT_SPORTS_ENABLED", "True").lower() != "false"
 
 # ---------------------------------------------------------------------------
 # 7. External API Keys
