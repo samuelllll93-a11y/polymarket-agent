@@ -247,12 +247,16 @@ class BTCAgent:
         if self.market_scanner is not None:
             # Only re-query the scanner if interval has elapsed
             if now - self._last_scanner_refresh >= self._MARKET_REFRESH_INTERVAL:
-                self._last_scanner_refresh = now
                 try:
                     scanner_markets = self.market_scanner.get_markets(category="btc")
                     # Convert Market objects to dicts for compatibility
                     self._btc_markets = [m.raw if m.raw else m.to_dict() for m in scanner_markets]
                     if scanner_markets:
+                        # Only stamp the refresh time when we actually got markets.
+                        # If scanner returned 0 (e.g. initial scan timed out), leave
+                        # _last_scanner_refresh unchanged so we retry next cycle instead
+                        # of locking out queries for 15 minutes.
+                        self._last_scanner_refresh = now
                         logger.info(
                             "BTCAgent: refreshed %d BTC markets from MarketScanner "
                             "(liquidity-filtered, spread-filtered)",
@@ -261,7 +265,7 @@ class BTCAgent:
                     else:
                         logger.warning(
                             "BTCAgent: MarketScanner returned 0 BTC markets — "
-                            "no signals will be generated until next refresh"
+                            "will retry next scan cycle"
                         )
                     return
                 except Exception as exc:

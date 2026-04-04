@@ -145,7 +145,7 @@ TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 NEWS_API_KEY: str = os.getenv("NEWS_API_KEY", "")
 ODDS_API_KEY: str = os.getenv("ODDS_API_KEY", "")
-ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_API_KEY: str = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
 
 # Alchemy / Polygon RPC — falls back to public endpoint if not set
 _ALCHEMY_RPC_URL: str = os.getenv("ALCHEMY_RPC_URL", "")
@@ -311,7 +311,7 @@ def credential_health_check() -> list[tuple[str, str]]:
         _status(POLY_API_SECRET, "DRY_RUN forced — no live orders"),
     ))
     rows.append((
-        "ANTHROPIC_API_KEY",
+        "CLAUDE_API_KEY / ANTHROPIC_API_KEY",
         _status(ANTHROPIC_API_KEY, "PoliticsAgent uses keyword heuristic"),
     ))
     rows.append((
