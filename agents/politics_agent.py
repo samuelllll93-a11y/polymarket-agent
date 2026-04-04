@@ -18,7 +18,7 @@ All Claude calls go through the Anthropic SDK (model: claude-haiku-4-5 for cost)
 
 DRY_RUN=True always — signals are logged but no orders placed.
 Gracefully degrades: if NEWS_API_KEY missing, uses Claude with no news context.
-If ANTHROPIC_API_KEY missing, falls back to keyword-sentiment heuristic only.
+If CLAUDE_API_KEY (or ANTHROPIC_API_KEY) missing, falls back to keyword-sentiment heuristic only.
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ class PoliticsAgent:
         self.portfolio_value = portfolio_value
 
         self.news_api_key: str = config.NEWS_API_KEY
-        self.anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+        self.anthropic_api_key: str = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
 
         self._running: bool = False
         self._session: Optional[aiohttp.ClientSession] = None
@@ -116,7 +116,7 @@ class PoliticsAgent:
         if not self.news_api_key:
             logger.warning("PoliticsAgent: NEWS_API_KEY not set — will score with Claude only")
         if not self.anthropic_api_key:
-            logger.warning("PoliticsAgent: ANTHROPIC_API_KEY not set — will use heuristic fallback")
+            logger.warning("PoliticsAgent: CLAUDE_API_KEY not set — will use heuristic fallback")
 
         logger.info(
             "PoliticsAgent initialised | dry_run=%s | min_edge=%.1f%% | scan_interval=%ds",
