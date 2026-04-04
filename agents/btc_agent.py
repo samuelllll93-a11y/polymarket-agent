@@ -392,6 +392,22 @@ class BTCAgent:
         if threshold is None:
             return None
 
+        # Filter: skip markets where the price threshold is more than 20% away
+        # from the current BTC price. The log-normal model produces meaningless
+        # probabilities for extreme targets (e.g. $1M when BTC = $83k).
+        if self._latest_price is not None and self._latest_price > 0:
+            gap_pct = abs(threshold - self._latest_price) / self._latest_price * 100
+            if gap_pct > 20.0:
+                logger.info(
+                    "[BTC] Skipping %s — threshold $%,.0f too far from current "
+                    "price $%,.0f (gap: %.0f%%)",
+                    market_id[:16],
+                    threshold,
+                    self._latest_price,
+                    gap_pct,
+                )
+                return None
+
         # Parse expiry
         expiry_dt = self._parse_expiry(market)
         if expiry_dt is None:
@@ -489,9 +505,17 @@ class BTCAgent:
                 raw = match.group(1).replace(",", "")
                 try:
                     value = float(raw)
-                    # Handle 'k' suffix (e.g. "100k")
-                    if "k" in question[match.start():match.end()].lower():
-                        value *= 1000
+                    # Check the character immediately after the captured number
+                    # for magnitude suffix (k/K = thousands, m/M = millions).
+                    # Use match.start(1) + len(group) to find exactly where the
+                    # digit string ends — avoids false matches from words like
+                    # "bitcoin" containing 'b' or "momentum" containing 'm'.
+                    num_end = match.start(1) + len(match.group(1))
+                    next_char = question[num_end:num_end + 1].lower()
+                    if next_char == "k":
+                        value *= 1_000
+                    elif next_char == "m":
+                        value *= 1_000_000
                     return value
                 except ValueError:
                     continue
