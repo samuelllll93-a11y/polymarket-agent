@@ -33,9 +33,17 @@ GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
 _CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "btc":       ["bitcoin", "btc", "crypto btc"],
     "crypto":    ["ethereum", "eth", "crypto", "solana", "sol", "defi"],
-    "weather":   ["hurricane", "tornado", "rainfall", "temperature", "storm", "flood"],
-    "politics":  ["election", "president", "senate", "congress", "vote", "govern",
-                  "biden", "trump", "democrat", "republican", "candidate"],
+    "weather":   [
+        "hurricane", "tornado", "rainfall", "temperature", "storm", "flood",
+        "precipitation", "snow", "snowfall", "drought", "wildfire", "typhoon",
+        "cyclone", "heatwave", "heat wave", "blizzard", "weather",
+    ],
+    "politics":  [
+        "election", "president", "senate", "congress", "vote", "govern",
+        "biden", "trump", "democrat", "republican", "candidate",
+        "referendum", "poll", "ballot", "parliament", "minister",
+        "legislation", "tariff", "sanction", "veto", "impeach",
+    ],
     "sports":    ["nfl", "nba", "mlb", "nhl", "soccer", "football", "basketball",
                   "baseball", "tennis", "golf", "ufc", "championship", "super bowl",
                   "world cup", "olympic"],
