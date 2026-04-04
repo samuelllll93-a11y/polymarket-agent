@@ -58,6 +58,7 @@ class Signal:
     edge: float                 # fair_value - market_price (positive = buy YES)
     confidence: float           # 0-1 confidence in the fair_value estimate
     agent: str = "btc"
+    expiry: Optional[datetime] = None
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __str__(self) -> str:
@@ -103,11 +104,13 @@ class BTCAgent:
         dry_run: bool = config.DRY_RUN,
         price_history_seconds: int = 60,
         market_scanner: Optional[MarketScanner] = None,
+        risk_manager: Optional[Any] = None,
     ):
         self.clob_client = clob_client
         self.signal_callback = signal_callback
         self.dry_run = dry_run
         self.market_scanner = market_scanner
+        self.risk_manager = risk_manager
 
         # Rolling price window
         self._price_history: deque[tuple[float, float]] = deque()  # (timestamp, price)
@@ -122,6 +125,7 @@ class BTCAgent:
         self._last_market_scan: float = 0.0
         self._last_scanner_refresh: float = 0.0
         self._btc_markets: list[dict] = []
+        self._signalled: dict[str, float] = {}  # market_id → last signal timestamp
 
         logger.info(
             "BTCAgent initialised | dry_run=%s | ws_url=%s | market_scanner=%s",
@@ -325,7 +329,37 @@ class BTCAgent:
             if abs(signal.edge) < config.MIN_KELLY_EDGE:
                 continue
 
-            logger.info("Signal generated: %s", signal)
+            # --- Deduplication -------------------------------------------
+            _now = time.time()
+            _mid = signal.market_id
+
+            if self.risk_manager and _mid in self.risk_manager.open_positions:
+                logger.debug("[BTC] Signal deduplicated — open position in %s", _mid[:16])
+                continue
+
+            _last = self._signalled.get(_mid, 0.0)
+            if _last:
+                _elapsed_min = (_now - _last) / 60.0
+                if _elapsed_min < 10.0:
+                    logger.info(
+                        "[BTC] Signal deduplicated — already signalled %s %.1f minutes ago",
+                        _mid[:16],
+                        _elapsed_min,
+                    )
+                    continue
+
+            self._signalled[_mid] = _now
+            # -------------------------------------------------------------
+
+            _expiry_str = signal.expiry.strftime("%Y-%m-%d") if signal.expiry else "unknown"
+            logger.info(
+                "[BTC] Signal: %r | expiry=%s | side=%s | edge=%+.4f | id=%s",
+                signal.market_question[:80],
+                _expiry_str,
+                signal.side,
+                signal.edge,
+                _mid[:16],
+            )
 
             if self.dry_run:
                 logger.info(
@@ -395,6 +429,7 @@ class BTCAgent:
             market_price=round(market_price, 4),
             edge=round(edge, 4),
             confidence=round(confidence, 3),
+            expiry=expiry_dt,
         )
 
     def estimate_probability(

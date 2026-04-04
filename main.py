@@ -320,6 +320,7 @@ class PolymarketBot:
                 signal_callback=self.router.handle_signal,
                 dry_run=self.dry_run,
                 market_scanner=self.market_scanner,
+                risk_manager=self.risk_manager,
             )
             enabled_agents.append("btc")
 
