@@ -168,24 +168,35 @@ class PoliticsAgent:
             "language": "en",
             "apiKey": self.news_api_key,
         }
-        try:
-            async with session.get(f"{NEWS_API_BASE}/everything", params=params) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    articles = data.get("articles", [])
-                    logger.debug(
-                        "PoliticsAgent: NewsAPI returned %d articles for query '%s'",
-                        len(articles), query
-                    )
-                    return articles
-                elif resp.status == 401:
-                    logger.error("PoliticsAgent: NewsAPI 401 — invalid API key")
-                elif resp.status == 429:
-                    logger.warning("PoliticsAgent: NewsAPI rate limited")
-                else:
-                    logger.warning("PoliticsAgent: NewsAPI HTTP %d", resp.status)
-        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-            logger.error("PoliticsAgent: NewsAPI error: %s", exc)
+        _backoff = 2.0
+        for _attempt in range(1, 6):
+            try:
+                async with session.get(f"{NEWS_API_BASE}/everything", params=params) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        articles = data.get("articles", [])
+                        logger.debug(
+                            "PoliticsAgent: NewsAPI returned %d articles for query '%s'",
+                            len(articles), query
+                        )
+                        return articles
+                    elif resp.status == 401:
+                        logger.error("PoliticsAgent: NewsAPI 401 — invalid API key")
+                        return []  # Key invalid — no point retrying
+                    elif resp.status == 429:
+                        logger.warning(
+                            "PoliticsAgent: NewsAPI rate limited (attempt %d/5) — "
+                            "retrying in %.0fs", _attempt, _backoff
+                        )
+                        await asyncio.sleep(_backoff)
+                        _backoff = min(_backoff * 2, 300.0)  # cap at 5 minutes
+                        continue
+                    else:
+                        logger.warning("PoliticsAgent: NewsAPI HTTP %d", resp.status)
+                        return []
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                logger.error("PoliticsAgent: NewsAPI error: %s", exc)
+                return []
         return []
 
     # ------------------------------------------------------------------

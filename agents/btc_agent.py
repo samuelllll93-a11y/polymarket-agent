@@ -392,16 +392,25 @@ class BTCAgent:
         if threshold is None:
             return None
 
+        # Filter: drop unrealistic thresholds (>$1M) immediately — these are
+        # never tradeable and generate ~960 log lines per night at WARNING level.
+        if threshold > 1_000_000:
+            logger.debug(
+                "[BTC] Skipping %s — threshold $%,.0f above $1M cap",
+                market_id[:16], threshold,
+            )
+            return None
+
         # Filter: skip markets where the price threshold is more than 20% away
         # from the current BTC price. The log-normal model produces meaningless
-        # probabilities for extreme targets (e.g. $1M when BTC = $83k).
+        # probabilities for extreme targets (e.g. $150k when BTC = $83k).
         if self._latest_price is not None and self._latest_price > 0:
             gap_pct = abs(threshold - self._latest_price) / self._latest_price * 100
             if gap_pct > 20.0:
-                logger.info(
-                    f"[BTC] Skipping {market_id[:16]} — threshold ${threshold:,.0f} "
-                    f"too far from current price ${self._latest_price:,.0f} "
-                    f"(gap: {gap_pct:.0f}%)"
+                logger.debug(
+                    "[BTC] Skipping %s — threshold $%,.0f too far from current "
+                    "price $%,.0f (gap: %.0f%%)",
+                    market_id[:16], threshold, self._latest_price, gap_pct,
                 )
                 return None
 

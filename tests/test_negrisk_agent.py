@@ -105,12 +105,12 @@ def test_low_edge_filtered(agent):
 # ---------------------------------------------------------------------------
 
 def test_low_liquidity_filtered(agent):
-    """Markets with liquidity below MIN_LIQUIDITY should be skipped."""
-    # Great edge but terrible liquidity
+    """Markets with liquidity below MIN_LIQUIDITY ($25k) should be skipped."""
+    # Great edge but terrible liquidity (below new $25k threshold)
     events = [make_event("Illiquid Market", [
-        make_market("cid_A", 0.20, liquidity=50_000),   # below $100k
-        make_market("cid_B", 0.20, liquidity=50_000),
-        make_market("cid_C", 0.20, liquidity=50_000),
+        make_market("cid_A", 0.20, liquidity=10_000),   # below $25k
+        make_market("cid_B", 0.20, liquidity=10_000),
+        make_market("cid_C", 0.20, liquidity=10_000),
     ])]
     signals = agent.find_arb_opportunities(events)
     assert len(signals) == 0

@@ -85,12 +85,17 @@ class SignalRouter:
         self.signals_approved: int = 0
         self.trades_executed: int = 0
         self.arb_signals_processed: int = 0
+        self._best_signal: Optional[Signal] = None  # highest-edge signal since last heartbeat
 
     async def handle_signal(self, signal: Signal) -> None:
         """
         Process a probability-based signal through the risk manager.
         """
         self.signals_processed += 1
+
+        # Track best-edge signal for heartbeat visibility
+        if self._best_signal is None or abs(signal.edge) > abs(self._best_signal.edge):
+            self._best_signal = signal
 
         logger.info(
             "Signal received | %s | edge=%+.4f | conf=%.2f",
@@ -259,23 +264,38 @@ class PolymarketBot:
         self.risk_manager = RiskManager(capital_usd=config.TOTAL_CAPITAL_USD)
         self.alerter = TelegramAlerter(dry_run=self.dry_run)
 
-        # MarketScanner — run first scan before agents start (15s timeout)
+        # MarketScanner — run first scan before agents start (45s timeout, 3 attempts)
         self.market_scanner = MarketScanner(
             clob_client=self.clob_client,
             dry_run=self.dry_run,
         )
-        try:
-            markets = await asyncio.wait_for(self.market_scanner.scan(), timeout=15.0)
-            logger.info("Scanning %d active markets", len(markets))
-        except asyncio.TimeoutError:
+        markets: list = []
+        for _attempt in range(1, 4):
+            try:
+                markets = await asyncio.wait_for(self.market_scanner.scan(), timeout=45.0)
+                logger.info("Scanning %d active markets (attempt %d)", len(markets), _attempt)
+                if markets:
+                    break
+                logger.warning(
+                    "Initial market scan returned 0 markets on attempt %d — retrying", _attempt
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Initial market scan timed out after 45s (attempt %d/3)", _attempt
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Initial market scan failed (attempt %d/3): %s", _attempt, exc
+                )
+            if _attempt < 3:
+                _backoff = 2 ** _attempt  # 2s, 4s
+                logger.info("Retrying initial market scan in %ds…", _backoff)
+                await asyncio.sleep(_backoff)
+        if not markets:
             logger.warning(
-                "Initial market scan timed out after 15s — agents starting with "
-                "empty market list, scanner will refresh in background"
+                "All 3 initial scan attempts failed — agents starting with empty "
+                "market list, scanner will refresh in background"
             )
-            markets = []
-        except Exception as exc:
-            logger.warning("Initial market scan failed: %s — agents will scan independently", exc)
-            markets = []
 
         if not markets:
             logger.warning(
@@ -428,9 +448,14 @@ class PolymarketBot:
                 break
             try:
                 summary = self.risk_manager.get_portfolio_summary()
+                best = self.router._best_signal if self.router else None
+                self.router._best_signal = None  # reset after each heartbeat
                 await self.alerter.send_heartbeat(
                     portfolio_value=summary["portfolio_value_usd"],
                     open_positions=summary["open_positions"],
+                    signals_processed=self.router.signals_processed if self.router else 0,
+                    signals_approved=self.router.signals_approved if self.router else 0,
+                    top_signal=best,
                 )
             except Exception as exc:
                 logger.error("Heartbeat loop error: %s", exc)

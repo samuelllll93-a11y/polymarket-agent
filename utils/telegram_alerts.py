@@ -284,13 +284,27 @@ class TelegramAlerter:
         )
         await self.send(msg)
 
-    async def send_heartbeat(self, portfolio_value: float, open_positions: int) -> None:
-        """Periodic alive ping (every 5 minutes by default)."""
+    async def send_heartbeat(
+        self,
+        portfolio_value: float,
+        open_positions: int,
+        signals_processed: int = 0,
+        signals_approved: int = 0,
+        top_signal: Optional[object] = None,
+    ) -> None:
+        """Periodic alive ping with signal counts and top opportunity."""
+        top_line = ""
+        if top_signal is not None:
+            q = getattr(top_signal, "market_question", "")
+            edge = getattr(top_signal, "edge", 0.0)
+            side = getattr(top_signal, "side", "")
+            short_q = q[:60] + "…" if len(q) > 60 else q
+            top_line = f"\n🔎 Top: {side} {short_q} (edge {edge:+.1%})"
         msg = (
-            f"Heartbeat | "
-            f"Portfolio: ${portfolio_value:,.2f} | "
-            f"Positions: {open_positions} | "
-            f"{datetime.utcnow().strftime('%H:%M')} UTC"
+            f"💓 Heartbeat | {datetime.utcnow().strftime('%H:%M')} UTC\n"
+            f"Portfolio: ${portfolio_value:,.2f} | Positions: {open_positions}\n"
+            f"Signals: {signals_processed} seen, {signals_approved} approved"
+            f"{top_line}"
         )
         await self.send(msg)
 
