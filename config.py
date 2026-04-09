@@ -120,6 +120,18 @@ NOAA_LOCATIONS: dict = {
 }
 
 # ---------------------------------------------------------------------------
+# 5d. Late Resolution Sniper Settings
+# ---------------------------------------------------------------------------
+
+LATE_RES_ENABLED: bool = os.getenv("LATE_RES_ENABLED", "True").lower() != "false"
+LATE_RES_MIN_CONFIDENCE: int = int(os.getenv("LATE_RES_MIN_CONFIDENCE", "70"))
+LATE_RES_MIN_PRICE: float = float(os.getenv("LATE_RES_MIN_PRICE", "0.970"))
+LATE_RES_MAX_PRICE: float = float(os.getenv("LATE_RES_MAX_PRICE", "0.995"))
+LATE_RES_MAX_POSITION_USD: float = float(os.getenv("LATE_RES_MAX_POSITION_USD", "50"))
+LATE_RES_MAX_TOTAL_EXPOSURE: float = float(os.getenv("LATE_RES_MAX_TOTAL_EXPOSURE", "500"))
+LATE_RES_SCAN_INTERVAL: int = int(os.getenv("LATE_RES_SCAN_INTERVAL", "120"))
+
+# ---------------------------------------------------------------------------
 # 5c. Politics Agent Settings
 # ---------------------------------------------------------------------------
 
@@ -136,6 +148,7 @@ AGENT_BTC_ENABLED: bool = os.getenv("AGENT_BTC_ENABLED", "True").lower() != "fal
 AGENT_WEATHER_ENABLED: bool = os.getenv("AGENT_WEATHER_ENABLED", "True").lower() != "false"
 AGENT_POLITICS_ENABLED: bool = os.getenv("AGENT_POLITICS_ENABLED", "True").lower() != "false"
 AGENT_SPORTS_ENABLED: bool = os.getenv("AGENT_SPORTS_ENABLED", "True").lower() != "false"
+AGENT_LATE_RES_ENABLED: bool = os.getenv("AGENT_LATE_RES_ENABLED", "True").lower() != "false"
 
 # ---------------------------------------------------------------------------
 # 7. External API Keys
@@ -260,6 +273,8 @@ def get_config_summary() -> str:
         enabled_agents.append("politics")
     if AGENT_SPORTS_ENABLED:
         enabled_agents.append("sports")
+    if AGENT_LATE_RES_ENABLED:
+        enabled_agents.append("late_res")
 
     creds_status = "SET" if POLY_API_KEY else "MISSING"
     telegram_status = "SET" if TELEGRAM_BOT_TOKEN else "MISSING"

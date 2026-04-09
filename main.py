@@ -48,6 +48,7 @@ from agents.negrisk_agent import NegRiskAgent, ArbSignal
 from agents.weather_agent import WeatherAgent
 from agents.politics_agent import PoliticsAgent
 from agents.sports_agent import SportsAgent
+from agents.late_resolution_agent import LateResolutionAgent
 from utils.telegram_alerts import TelegramAlerter
 
 logger = logging.getLogger(__name__)
@@ -236,6 +237,7 @@ class PolymarketBot:
         self.weather_agent: Optional[WeatherAgent] = None
         self.politics_agent: Optional[PoliticsAgent] = None
         self.sports_agent: Optional[SportsAgent] = None
+        self.late_res_agent: Optional[LateResolutionAgent] = None
 
     # ------------------------------------------------------------------
     # Startup
@@ -380,6 +382,16 @@ class PolymarketBot:
             else:
                 logger.info("Sports agent: DISABLED (ODDS_API_KEY not set)")
 
+        # Late Resolution Sniper agent
+        if config.AGENT_LATE_RES_ENABLED:
+            self.late_res_agent = LateResolutionAgent(
+                signal_callback=None,  # Self-contained — uses own position tracker
+                alerter=self.alerter,
+                dry_run=self.dry_run,
+            )
+            enabled_agents.append("late_res")
+            logger.info("Late Resolution agent: ENABLED")
+
         # Startup alert
         await self.alerter.send_startup(enabled_agents)
 
@@ -407,6 +419,11 @@ class PolymarketBot:
         if self.sports_agent:
             self._tasks.append(
                 asyncio.create_task(self.sports_agent.run(), name="sports_agent")
+            )
+
+        if self.late_res_agent:
+            self._tasks.append(
+                asyncio.create_task(self.late_res_agent.run(), name="late_res_agent")
             )
 
         # MarketScanner background refresh
@@ -502,6 +519,8 @@ class PolymarketBot:
             await self.politics_agent.stop()
         if self.sports_agent:
             await self.sports_agent.stop()
+        if self.late_res_agent:
+            await self.late_res_agent.stop()
 
         # Cancel background tasks
         for task in self._tasks:
