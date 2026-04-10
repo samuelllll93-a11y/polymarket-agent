@@ -116,32 +116,40 @@ def score_resolution_confidence(
     score = 0
 
     # --- TIME-BASED signals ---
-    end_date_str = (
-        market.get("endDate")
-        or market.get("end_date_iso")
-        or market.get("end_date")
-        or market.get("expiration")
-        or ""
+    # A closed market is already past resolution — highest confidence tier
+    is_closed = (
+        market.get("closed", False)
+        or str(market.get("active", "true")).lower() == "false"
     )
-    if end_date_str:
-        try:
-            end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
-            now = datetime.now(timezone.utc)
-            hours_to_end = (end_date - now).total_seconds() / 3600.0
+    if is_closed:
+        score += 90
+    else:
+        end_date_str = (
+            market.get("endDate")
+            or market.get("end_date_iso")
+            or market.get("end_date")
+            or market.get("expiration")
+            or ""
+        )
+        if end_date_str:
+            try:
+                end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                now = datetime.now(timezone.utc)
+                hours_to_end = (end_date - now).total_seconds() / 3600.0
 
-            if hours_to_end <= 0:
-                # End date already passed, oracle pending
-                score += 90
-            elif hours_to_end <= 1:
-                score += 90
-            elif hours_to_end <= 6:
-                score += 70
-            elif hours_to_end <= 24:
-                score += 50
-            elif hours_to_end <= 48:
-                score += 30
-        except (ValueError, TypeError):
-            pass
+                if hours_to_end <= 0:
+                    # End date already passed, oracle pending
+                    score += 90
+                elif hours_to_end <= 1:
+                    score += 90
+                elif hours_to_end <= 6:
+                    score += 70
+                elif hours_to_end <= 24:
+                    score += 50
+                elif hours_to_end <= 48:
+                    score += 30
+            except (ValueError, TypeError):
+                pass
 
     # --- PRICE-BASED signals ---
     if 0.990 <= best_price <= 0.995:
