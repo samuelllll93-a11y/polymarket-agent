@@ -133,10 +133,12 @@ def score_resolution_confidence(
                 # End date already passed, oracle pending
                 score += 90
             elif hours_to_end <= 1:
-                score += 70
+                score += 90
             elif hours_to_end <= 6:
-                score += 50
+                score += 70
             elif hours_to_end <= 24:
+                score += 50
+            elif hours_to_end <= 48:
                 score += 30
         except (ValueError, TypeError):
             pass
@@ -262,34 +264,77 @@ class LateResolutionAgent:
 
     async def fetch_active_markets(self) -> list[dict]:
         """
-        Fetch active, non-negRisk markets from the Gamma API.
+        Fetch near-expiry markets from the Gamma API.
+
+        Two queries:
+          1. Active markets with endDate within 48 hours (imminent resolution)
+          2. Recently closed markets not yet settled (oracle pending)
 
         Returns:
-            List of market dicts.
+            Combined, deduplicated list of market dicts (negRisk excluded).
         """
         session = await self._get_session()
         url = f"{config.POLY_GAMMA_API_URL}/markets"
-        params = {
+        end_date_max = (
+            datetime.now(timezone.utc) + timedelta(hours=48)
+        ).isoformat()
+
+        all_markets: list[dict] = []
+
+        # --- Query 1: active markets expiring within 48h ---
+        params_active = {
             "active": "true",
             "closed": "false",
-            "limit": 200,
+            "end_date_max": end_date_max,
+            "limit": 100,
         }
-
-        all_markets = []
         try:
-            async with session.get(url, params=params) as resp:
+            async with session.get(url, params=params_active) as resp:
                 if resp.status == 200:
                     data = await resp.json(content_type=None)
                     if isinstance(data, list):
-                        all_markets = data
+                        all_markets.extend(data)
                     elif isinstance(data, dict):
-                        all_markets = data.get("data", data.get("markets", []))
+                        all_markets.extend(
+                            data.get("data", data.get("markets", []))
+                        )
                 else:
                     logger.warning(
-                        "LateRes: Gamma API HTTP %d — skipping scan", resp.status
+                        "LateRes: Gamma API (active) HTTP %d", resp.status
                     )
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-            logger.error("LateRes: Gamma API error: %s", exc)
+            logger.error("LateRes: Gamma API (active) error: %s", exc)
+
+        # --- Query 2: closed but not yet settled (oracle pending) ---
+        params_closed = {
+            "closed": "true",
+            "limit": 50,
+        }
+        try:
+            async with session.get(url, params=params_closed) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    closed_markets = []
+                    if isinstance(data, list):
+                        closed_markets = data
+                    elif isinstance(data, dict):
+                        closed_markets = data.get("data", data.get("markets", []))
+                    # Only keep markets with near-resolution prices (>0.95 on one side)
+                    seen_ids = {
+                        m.get("conditionId") or m.get("condition_id") or m.get("id")
+                        for m in all_markets
+                    }
+                    for m in closed_markets:
+                        mid = m.get("conditionId") or m.get("condition_id") or m.get("id")
+                        if mid and mid not in seen_ids:
+                            all_markets.append(m)
+                            seen_ids.add(mid)
+                else:
+                    logger.warning(
+                        "LateRes: Gamma API (closed) HTTP %d", resp.status
+                    )
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error("LateRes: Gamma API (closed) error: %s", exc)
 
         # Filter out negRisk markets
         return [m for m in all_markets if not m.get("negRisk", False)]

@@ -122,10 +122,10 @@ def test_confidence_end_date_within_6_hours():
 # ---------------------------------------------------------------------------
 
 def test_confidence_high_price_bonus():
-    market = make_market(end_date=future_iso(48), yes_price=0.993)  # >24h, no time bonus
+    market = make_market(end_date=future_iso(48), yes_price=0.993)  # 48h → +30 time bonus
     score = score_resolution_confidence(market, best_price=0.993, spread=0.003, volume_24h=15000)
-    # +0 (time >24h) +30 (price) +10 (vol) +10 (spread) = 50
-    assert score == 50
+    # +30 (time <=48h) +30 (price) +10 (vol) +10 (spread) = 80
+    assert score == 80
 
 
 # ---------------------------------------------------------------------------
