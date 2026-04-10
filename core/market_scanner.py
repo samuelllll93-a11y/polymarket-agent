@@ -151,7 +151,7 @@ class MarketScanner:
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=10, connect=5),
+                timeout=aiohttp.ClientTimeout(total=30, connect=10),
                 headers={"User-Agent": "polymarket-bot/1.0"},
             )
         return self._session
@@ -188,7 +188,7 @@ class MarketScanner:
             logger.error("MarketScanner: Gamma API error (offset=%d): %s", offset, exc)
             return []
         except Exception as exc:
-            logger.error("MarketScanner: Unexpected error (offset=%d): %s", offset, exc)
+            logger.error("MarketScanner: Unexpected error (offset=%d): %s", offset, repr(exc) or type(exc).__name__)
             return []
 
     async def _fetch_all_raw(

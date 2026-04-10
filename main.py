@@ -443,6 +443,14 @@ class PolymarketBot:
             asyncio.create_task(self._daily_report_loop(), name="daily_report")
         )
 
+        # Telegram command handler (/home, etc.)
+        self._tasks.append(
+            asyncio.create_task(
+                self.alerter.start_command_handler(bot_ref=self),
+                name="telegram_commands",
+            )
+        )
+
         logger.info(
             "Bot started | agents=%s | DRY_RUN=%s | markets=%d",
             enabled_agents,

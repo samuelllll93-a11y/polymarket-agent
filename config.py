@@ -156,6 +156,16 @@ AGENT_LATE_RES_ENABLED: bool = os.getenv("AGENT_LATE_RES_ENABLED", "True").lower
 
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# Authorised Telegram chat IDs — comma-separated list of chat IDs allowed
+# to issue commands.  Falls back to TELEGRAM_CHAT_ID if not set.
+_raw_authorized = os.getenv("TELEGRAM_AUTHORIZED_CHAT_IDS", "")
+TELEGRAM_AUTHORIZED_CHAT_IDS: set[str] = {
+    cid.strip()
+    for cid in (_raw_authorized or TELEGRAM_CHAT_ID).split(",")
+    if cid.strip()
+}
+
 NEWS_API_KEY: str = os.getenv("NEWS_API_KEY", "")
 ODDS_API_KEY: str = os.getenv("ODDS_API_KEY", "")
 ANTHROPIC_API_KEY: str = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY", "")

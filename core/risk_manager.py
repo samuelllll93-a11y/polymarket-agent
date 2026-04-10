@@ -82,6 +82,11 @@ class RiskManager:
         self.open_positions: dict[str, Position] = {}   # market_id -> Position
         self.daily_realised_pnl: float = 0.0
         self.daily_loss_start: date = date.today()
+        self.total_wins: int = 0
+        self.total_losses: int = 0
+
+        # Per-trade history (populated on close_position) — used for /summary
+        self._trade_log: list[dict] = []
 
         # Kill switch
         self.kill_switch_active: bool = False
@@ -347,6 +352,11 @@ class RiskManager:
         self.daily_realised_pnl += realised_pnl
         self.portfolio_value_usd += realised_pnl
 
+        if realised_pnl >= 0:
+            self.total_wins += 1
+        else:
+            self.total_losses += 1
+
         logger.info(
             "Position closed | market=%s | side=%s | pnl=%.2f | "
             "daily_pnl=%.2f | portfolio=%.2f",
@@ -356,6 +366,14 @@ class RiskManager:
             self.daily_realised_pnl,
             self.portfolio_value_usd,
         )
+
+        self._trade_log.append({
+            "market_id": market_id,
+            "side": position.side,
+            "size_usd": position.size_usd,
+            "pnl_usd": realised_pnl,
+            "closed_at": datetime.utcnow(),
+        })
 
         # Check if kill switch should trigger post-close
         if self.daily_realised_pnl <= -config.DAILY_LOSS_LIMIT_USD:
@@ -387,6 +405,10 @@ class RiskManager:
         pos = self.open_positions.get(market_id)
         return pos.size_usd if pos else 0.0
 
+    def get_trades_since(self, cutoff: datetime) -> list[dict]:
+        """Return closed trades recorded since the given UTC datetime."""
+        return [t for t in self._trade_log if t["closed_at"] >= cutoff]
+
     def get_portfolio_summary(self) -> dict:
         """Return a serialisable summary of portfolio state."""
         drawdown = 0.0
@@ -404,4 +426,6 @@ class RiskManager:
             "kill_switch_active": self.kill_switch_active,
             "kill_switch_reason": self.kill_switch_reason,
             "drawdown_pct": drawdown,
+            "total_wins": self.total_wins,
+            "total_losses": self.total_losses,
         }

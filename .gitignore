@@ -13,3 +13,4 @@ htmlcov/
 reports/
 *.log
 .DS_Store
+.env
