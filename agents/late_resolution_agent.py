@@ -475,7 +475,7 @@ class LateResolutionAgent:
     def _total_open_exposure(self) -> float:
         """Sum of all open/simulated position sizes."""
         return sum(
-            p.get("position_size_usd", 0)
+            p.get("position_usd", p.get("position_size_usd", 0))
             for p in self._positions
             if p.get("status") in ("open", "simulated")
         )
@@ -484,87 +484,152 @@ class LateResolutionAgent:
         """Count of open/simulated positions."""
         return sum(1 for p in self._positions if p.get("status") in ("open", "simulated"))
 
-    def _add_position(self, signal: LateResSignal) -> None:
-        """Add a new position to tracking."""
+    def _add_position(self, signal: LateResSignal) -> dict:
+        """Add a new position to tracking. Returns the position dict."""
         shares = signal.position_size_usd / signal.entry_price
         position = {
             "market_id": signal.market_id,
+            "condition_id": signal.market_id,
             "question": signal.question,
             "side": signal.side,
             "entry_price": signal.entry_price,
             "entry_time": signal.generated_at.isoformat(),
-            "position_size_usd": signal.position_size_usd,
+            "position_usd": signal.position_size_usd,
             "shares": round(shares, 2),
             "expected_resolution": signal.expected_resolution,
             "confidence_score": signal.confidence_score,
-            "status": "simulated" if self.dry_run else "open",
+            "status": "open",
+            "simulated": True,
         }
         self._positions.append(position)
         save_positions(self._positions)
+        return position
 
     # ------------------------------------------------------------------
     # Telegram Alerts
     # ------------------------------------------------------------------
 
-    async def _send_signal_alert(self, signal: LateResSignal) -> None:
-        """Send Telegram alert for a new signal."""
+    async def _send_buy_alert(
+        self, signal: LateResSignal, shares: float, time_str: str,
+    ) -> None:
+        """Send Telegram alert for a simulated BUY."""
         if self.alerter is None:
             return
-
-        # Calculate time to resolution
-        time_str = signal.expected_resolution
-        if time_str and time_str != "unknown":
-            try:
-                res_time = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
-                delta = res_time - datetime.now(timezone.utc)
-                if delta.total_seconds() <= 0:
-                    time_str = "overdue (oracle pending)"
-                elif delta.total_seconds() < 3600:
-                    time_str = f"{int(delta.total_seconds() / 60)}m"
-                else:
-                    time_str = f"{delta.total_seconds() / 3600:.1f}h"
-            except (ValueError, TypeError):
-                pass
-
-        mode = "DRY RUN" if self.dry_run else "LIVE"
         msg = (
-            f"<b>LATE RES SIGNAL [{mode}]</b>\n"
+            f"\U0001f7e2 <b>[DRY RUN] LATE RES BUY</b>\n"
             f"Market: <i>{signal.question[:60]}</i>\n"
             f"Side: <code>{signal.side}</code> @ <code>${signal.entry_price:.3f}</code>\n"
-            f"Edge: <code>{signal.net_edge:.1%}</code> | "
+            f"Size: <code>${signal.position_size_usd:.2f}</code> "
+            f"(<code>{shares:.1f} shares</code>)\n"
             f"Confidence: <code>{signal.confidence_score}/100</code>\n"
-            f"Expected resolution: <code>{time_str}</code>\n"
-            f"Position: <code>${signal.position_size_usd:.2f}</code>"
+            f"Edge: <code>{signal.net_edge:.1%}</code> net of fees\n"
+            f"Expected resolution: <code>{time_str}</code>"
         )
         await self.alerter.send(msg)
 
-    async def _send_close_alert(self, position: dict) -> None:
-        """Send Telegram alert when a position resolves."""
+    async def _send_win_alert(self, pos: dict, pnl: float, pnl_pct: float, dur_str: str) -> None:
+        """Telegram alert for a resolved WIN."""
+        if self.alerter is None:
+            return
+        msg = (
+            f"\u2705 <b>[DRY RUN] LATE RES CLOSED \u2014 WIN</b>\n"
+            f"Market: <i>{pos['question'][:60]}</i>\n"
+            f"Entry: <code>${pos['entry_price']:.3f}</code> \u2192 "
+            f"Exit: <code>$1.000</code>\n"
+            f"P&amp;L: <code>+${pnl:.2f}</code> (<code>{pnl_pct:.1%}</code>)\n"
+            f"Hold: <code>{dur_str}</code>\n"
+            f"Shares: <code>{pos['shares']:.1f}</code>"
+        )
+        await self.alerter.send(msg)
+
+    async def _send_loss_alert(self, pos: dict, pnl: float, pnl_pct: float, dur_str: str) -> None:
+        """Telegram alert for a resolved LOSS."""
+        if self.alerter is None:
+            return
+        msg = (
+            f"\u274c <b>[DRY RUN] LATE RES CLOSED \u2014 LOSS</b>\n"
+            f"Market: <i>{pos['question'][:60]}</i>\n"
+            f"Entry: <code>${pos['entry_price']:.3f}</code> \u2192 "
+            f"Exit: <code>$0.000</code>\n"
+            f"P&amp;L: <code>-${abs(pnl):.2f}</code> (<code>{pnl_pct:.1%}</code>)\n"
+            f"Hold: <code>{dur_str}</code>\n"
+            f"NOTE: Check for oracle dispute"
+        )
+        await self.alerter.send(msg)
+
+    async def _send_drop_warning(self, pos: dict, current_price: float, drop_pct: float) -> None:
+        """Telegram warning when price drops >3c from entry."""
+        if self.alerter is None:
+            return
+        msg = (
+            f"\u26a0\ufe0f <b>[DRY RUN] LATE RES WARNING</b>\n"
+            f"Market: <i>{pos['question'][:60]}</i>\n"
+            f"Entry: <code>${pos['entry_price']:.3f}</code> | "
+            f"Current: <code>${current_price:.3f}</code>\n"
+            f"Drop: <code>{drop_pct:.1%}</code> \u2014 possible dispute forming"
+        )
+        await self.alerter.send(msg)
+
+    async def _send_daily_summary(self) -> None:
+        """Send daily P&L summary for closed positions."""
         if self.alerter is None:
             return
 
-        entry = position["entry_price"]
-        pnl = position["shares"] * (1.0 - entry)
-        return_pct = (1.0 - entry) / entry
+        # Gather all positions closed today
+        today = datetime.now(timezone.utc).date()
+        closed_today = []
+        for p in self._positions:
+            if p.get("status") not in ("closed_win", "closed_loss"):
+                continue
+            closed_at = p.get("closed_at", "")
+            if not closed_at:
+                continue
+            try:
+                close_date = datetime.fromisoformat(closed_at).date()
+                if close_date == today:
+                    closed_today.append(p)
+            except (ValueError, TypeError):
+                continue
 
-        # Hold time
-        try:
-            entry_time = datetime.fromisoformat(position["entry_time"])
-            duration = datetime.now(timezone.utc) - entry_time
-            hours = duration.total_seconds() / 3600
-            if hours < 1:
-                dur_str = f"{int(duration.total_seconds() / 60)}m"
+        if not closed_today:
+            return
+
+        wins = sum(1 for p in closed_today if p["status"] == "closed_win")
+        losses = sum(1 for p in closed_today if p["status"] == "closed_loss")
+        total = wins + losses
+        win_rate = (wins / total) if total > 0 else 0.0
+        pnls = [p.get("realised_pnl", 0.0) for p in closed_today]
+        total_pnl = sum(pnls)
+        best = max(pnls) if pnls else 0.0
+        worst = min(pnls) if pnls else 0.0
+
+        # Avg hold time
+        hold_secs = []
+        for p in closed_today:
+            try:
+                entry_t = datetime.fromisoformat(p["entry_time"])
+                close_t = datetime.fromisoformat(p["closed_at"])
+                hold_secs.append((close_t - entry_t).total_seconds())
+            except (ValueError, TypeError, KeyError):
+                pass
+        if hold_secs:
+            avg_s = sum(hold_secs) / len(hold_secs)
+            if avg_s < 3600:
+                avg_str = f"{avg_s / 60:.0f}m"
             else:
-                dur_str = f"{hours:.1f}h"
-        except (ValueError, TypeError):
-            dur_str = "unknown"
+                avg_str = f"{avg_s / 3600:.1f}h"
+        else:
+            avg_str = "N/A"
 
         msg = (
-            f"<b>LATE RES CLOSED</b>\n"
-            f"Market: <i>{position['question'][:60]}</i>\n"
-            f"Entry: <code>${entry:.3f}</code> -> Exit: <code>$1.000</code>\n"
-            f"P&L: <code>+${pnl:.2f}</code> (<code>{return_pct:.1%}</code>)\n"
-            f"Hold time: <code>{dur_str}</code>"
+            f"\U0001f4ca <b>LATE RES DAILY SUMMARY</b>\n"
+            f"Trades closed: <code>{total}</code>\n"
+            f"Wins: <code>{wins}</code> (<code>{win_rate:.0%}</code>)\n"
+            f"Losses: <code>{losses}</code>\n"
+            f"Total P&amp;L: <code>${total_pnl:+.2f}</code>\n"
+            f"Avg hold time: <code>{avg_str}</code>\n"
+            f"Best trade: <code>+${best:.2f}</code>\n"
+            f"Worst trade: <code>${worst:.2f}</code>"
         )
         await self.alerter.send(msg)
 
@@ -640,25 +705,43 @@ class LateResolutionAgent:
 
                 signals_this_scan += 1
                 self._signals_found += 1
-                logger.info("LateRes signal: %s", signal)
 
-                # Track position
-                self._add_position(signal)
+                # Track position (open, monitored until resolution)
+                pos = self._add_position(signal)
+                shares = pos["shares"]
 
-                # Send alert
-                await self._send_signal_alert(signal)
+                # Calculate time to resolution for display
+                time_str = signal.expected_resolution
+                if time_str and time_str != "unknown":
+                    try:
+                        res_time = datetime.fromisoformat(
+                            time_str.replace("Z", "+00:00")
+                        )
+                        delta = res_time - datetime.now(timezone.utc)
+                        if delta.total_seconds() <= 0:
+                            time_str = "overdue (oracle pending)"
+                        elif delta.total_seconds() < 3600:
+                            time_str = f"{int(delta.total_seconds() / 60)}m"
+                        else:
+                            time_str = f"{delta.total_seconds() / 3600:.1f}h"
+                    except (ValueError, TypeError):
+                        pass
 
-                if self.dry_run:
-                    self._sim_trades += 1
-                    sim_pnl = signal.position_size_usd * net_edge
-                    self._sim_total_pnl += sim_pnl
-                    self._sim_wins += 1
-                    logger.info(
-                        "DRY_RUN: simulated trade %s %s @ %.3f | "
-                        "edge=%.2f%% | sim_pnl=+$%.2f",
-                        side, market_id[:16], best_price,
-                        net_edge * 100, sim_pnl,
-                    )
+                logger.info(
+                    "\U0001f7e2 [DRY RUN] LATE RES BUY\n"
+                    "  Market: %s\n"
+                    "  Side: %s @ $%.3f\n"
+                    "  Size: $%.2f (%.1f shares)\n"
+                    "  Confidence: %d/100\n"
+                    "  Edge: %.1f%% net of fees\n"
+                    "  Expected resolution: %s",
+                    question[:60], side, best_price,
+                    signal.position_size_usd, shares,
+                    conf, net_edge * 100, time_str,
+                )
+
+                # Telegram buy alert
+                await self._send_buy_alert(signal, shares, time_str)
 
             self._scans_completed += 1
             logger.info(
@@ -670,32 +753,223 @@ class LateResolutionAgent:
             logger.error("LateRes scan error: %s", exc)
 
     # ------------------------------------------------------------------
+    # Position Monitor Loop
+    # ------------------------------------------------------------------
+
+    async def _fetch_market_state(self, condition_id: str) -> Optional[dict]:
+        """Fetch current market state from Gamma API."""
+        session = await self._get_session()
+        url = f"{config.POLY_GAMMA_API_URL}/markets/{condition_id}"
+        try:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    return await resp.json(content_type=None)
+                logger.warning(
+                    "LateRes monitor: Gamma HTTP %d for %s",
+                    resp.status, condition_id[:16],
+                )
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.error("LateRes monitor: fetch error for %s: %s", condition_id[:16], exc)
+        return None
+
+    def _hold_duration_str(self, pos: dict) -> str:
+        """Return human-readable hold duration for a position."""
+        try:
+            entry_time = datetime.fromisoformat(pos["entry_time"])
+            duration = datetime.now(timezone.utc) - entry_time
+            hours = duration.total_seconds() / 3600
+            if hours < 1:
+                return f"{int(duration.total_seconds() / 60)}m"
+            return f"{hours:.1f}h"
+        except (ValueError, TypeError, KeyError):
+            return "unknown"
+
+    async def _monitor_positions(self) -> None:
+        """Check each open position for resolution or price drops."""
+        open_positions = [
+            p for p in self._positions if p.get("status") == "open"
+        ]
+        if not open_positions:
+            return
+
+        for pos in open_positions:
+            cid = pos.get("condition_id") or pos.get("market_id", "")
+            if not cid:
+                continue
+
+            market_data = await self._fetch_market_state(cid)
+            if market_data is None:
+                continue
+
+            # Determine current price on the position's side
+            current_price = self._parse_price(market_data, pos["side"].lower())
+            is_closed = (
+                market_data.get("closed", False)
+                or str(market_data.get("active", "true")).lower() == "false"
+            )
+
+            if current_price is None and not is_closed:
+                continue
+
+            entry = pos["entry_price"]
+            shares = pos["shares"]
+            dur_str = self._hold_duration_str(pos)
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            # --- Resolution: WIN (price >= 0.99 and market closed) ---
+            if is_closed and current_price is not None and current_price >= 0.99:
+                pnl = shares * (1.0 - entry)
+                pnl_pct = (1.0 - entry) / entry if entry > 0 else 0.0
+                pos["status"] = "closed_win"
+                pos["exit_price"] = 1.0
+                pos["realised_pnl"] = round(pnl, 2)
+                pos["closed_at"] = now_iso
+                self._sim_wins += 1
+                self._sim_trades += 1
+                self._sim_total_pnl += pnl
+                save_positions(self._positions)
+                logger.info(
+                    "\u2705 [DRY RUN] LATE RES CLOSED \u2014 WIN\n"
+                    "  Market: %s\n"
+                    "  Entry: $%.3f \u2192 Exit: $1.000\n"
+                    "  P&L: +$%.2f (%.1f%%)\n"
+                    "  Hold: %s | Shares: %.1f",
+                    pos["question"][:60], entry, pnl, pnl_pct * 100, dur_str, shares,
+                )
+                await self._send_win_alert(pos, pnl, pnl_pct, dur_str)
+                continue
+
+            # --- Resolution: LOSS (price <= 0.01 and market closed) ---
+            if is_closed and current_price is not None and current_price <= 0.01:
+                pnl = shares * (0.0 - entry)
+                pnl_pct = -1.0  # total loss
+                pos["status"] = "closed_loss"
+                pos["exit_price"] = 0.0
+                pos["realised_pnl"] = round(pnl, 2)
+                pos["closed_at"] = now_iso
+                self._sim_trades += 1
+                self._sim_total_pnl += pnl
+                save_positions(self._positions)
+                logger.info(
+                    "\u274c [DRY RUN] LATE RES CLOSED \u2014 LOSS\n"
+                    "  Market: %s\n"
+                    "  Entry: $%.3f \u2192 Exit: $0.000\n"
+                    "  P&L: -$%.2f (%.1f%%)\n"
+                    "  Hold: %s | Shares: %.1f\n"
+                    "  NOTE: Check for oracle dispute",
+                    pos["question"][:60], entry, abs(pnl), abs(pnl_pct) * 100,
+                    dur_str, shares,
+                )
+                await self._send_loss_alert(pos, pnl, pnl_pct, dur_str)
+                continue
+
+            # --- Market closed but ambiguous price ---
+            if is_closed:
+                # Resolved to intermediate price (unusual) — treat as loss
+                exit_price = current_price if current_price is not None else 0.0
+                pnl = shares * (exit_price - entry)
+                pnl_pct = (exit_price - entry) / entry if entry > 0 else 0.0
+                status = "closed_win" if pnl >= 0 else "closed_loss"
+                pos["status"] = status
+                pos["exit_price"] = exit_price
+                pos["realised_pnl"] = round(pnl, 2)
+                pos["closed_at"] = now_iso
+                self._sim_trades += 1
+                self._sim_total_pnl += pnl
+                if pnl >= 0:
+                    self._sim_wins += 1
+                save_positions(self._positions)
+                logger.info(
+                    "LateRes: position closed at ambiguous price %.3f | "
+                    "pnl=$%.2f | %s",
+                    exit_price, pnl, pos["question"][:40],
+                )
+                if pnl >= 0:
+                    await self._send_win_alert(pos, pnl, pnl_pct, dur_str)
+                else:
+                    await self._send_loss_alert(pos, pnl, pnl_pct, dur_str)
+                continue
+
+            # --- Price drop warning (>3c below entry while still open) ---
+            if current_price is not None and (entry - current_price) > 0.03:
+                drop_pct = (entry - current_price) / entry
+                # Only warn once per position per 30 min (use a flag)
+                last_warn = pos.get("_last_drop_warn", 0.0)
+                if time.time() - last_warn > 1800:
+                    pos["_last_drop_warn"] = time.time()
+                    logger.warning(
+                        "\u26a0\ufe0f [DRY RUN] LATE RES WARNING\n"
+                        "  Market: %s\n"
+                        "  Entry: $%.3f | Current: $%.3f\n"
+                        "  Drop: %.1f%% \u2014 possible dispute forming",
+                        pos["question"][:60], entry, current_price, drop_pct * 100,
+                    )
+                    await self._send_drop_warning(pos, current_price, drop_pct)
+
+            # Brief pause between API calls for rate limiting
+            await asyncio.sleep(0.5)
+
+    # ------------------------------------------------------------------
+    # Daily Summary Loop
+    # ------------------------------------------------------------------
+
+    async def _daily_summary_loop(self) -> None:
+        """Send a daily P&L summary at 00:00 UTC."""
+        try:
+            while self._running:
+                await asyncio.sleep(60)  # check every minute
+                if not self._running:
+                    break
+                now = datetime.now(timezone.utc)
+                if now.hour == 0 and now.minute == 0:
+                    await self._send_daily_summary()
+                    await asyncio.sleep(61)  # avoid double-send
+        except asyncio.CancelledError:
+            pass
+
+    # ------------------------------------------------------------------
     # Run Loop
     # ------------------------------------------------------------------
 
     async def run(self) -> None:
-        """Main scan loop. Runs every scan_interval seconds."""
+        """Main loop: scan for candidates + monitor open positions."""
         self._running = True
         logger.info(
-            "LateResolutionAgent starting | DRY_RUN=%s | scan_interval=%ds",
-            self.dry_run, self.scan_interval,
+            "LateResolutionAgent starting | DRY_RUN=%s | scan_interval=%ds | "
+            "open_positions=%d",
+            self.dry_run, self.scan_interval, self._open_position_count(),
         )
+
+        # Launch daily summary loop as a child task
+        summary_task = asyncio.create_task(
+            self._daily_summary_loop(), name="late_res_daily_summary"
+        )
+
         try:
             while self._running:
                 scan_start = time.monotonic()
+
+                # 1. Scan for new candidates
                 await self._run_scan()
+
+                # 2. Monitor open positions for resolution / price drops
+                await self._monitor_positions()
+
                 elapsed = time.monotonic() - scan_start
-                await asyncio.sleep(max(0, self.scan_interval - elapsed))
+                sleep_time = max(0, self.scan_interval - elapsed)
+                await asyncio.sleep(sleep_time)
         except asyncio.CancelledError:
             logger.info("LateResolutionAgent cancelled")
         finally:
             self._running = False
+            summary_task.cancel()
+            await asyncio.gather(summary_task, return_exceptions=True)
             await self._close_session()
             logger.info(
                 "LateResolutionAgent stopped | scans=%d | signals=%d | "
-                "sim_pnl=$%.2f",
+                "sim_trades=%d | sim_wins=%d | sim_pnl=$%.2f",
                 self._scans_completed, self._signals_found,
-                self._sim_total_pnl,
+                self._sim_trades, self._sim_wins, self._sim_total_pnl,
             )
 
     async def stop(self) -> None:
