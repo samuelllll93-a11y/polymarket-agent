@@ -33,9 +33,13 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# Risk keywords that indicate oracle dispute risk
+# Risk keywords that indicate oracle dispute risk.
+# NOTE: "resolution" is excluded — Polymarket uses "resolve/resolution" in
+# nearly every market description ("This market will resolve to ...") which
+# causes false-positive -50 penalties on legitimate candidates.
 RISK_KEYWORDS = [
-    "dispute", "resolution", "appeal", "oracle", "uma", "reopen",
+    "dispute", "disputed", "appeal", "appealed", "oracle",
+    "uma", "reopen", "reopened", "re-resolution",
 ]
 
 POSITIONS_FILE = Path(__file__).parent.parent / "data" / "late_res_positions.json"
