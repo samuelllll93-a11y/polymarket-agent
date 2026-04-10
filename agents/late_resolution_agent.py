@@ -659,11 +659,46 @@ class LateResolutionAgent:
 
                 # Score confidence
                 conf = score_resolution_confidence(market, best_price, spread, volume_24h)
+
+                # Calculate edge (needed for debug log even if filtered)
+                expected_return, net_edge = calculate_edge(best_price, self.TAKER_FEE)
+
+                # Parse hours remaining for debug log
+                _hours_remaining = -1.0
+                _end_str = (
+                    market.get("endDate")
+                    or market.get("end_date_iso")
+                    or market.get("end_date")
+                    or ""
+                )
+                if _end_str:
+                    try:
+                        _end_dt = datetime.fromisoformat(_end_str.replace("Z", "+00:00"))
+                        _hours_remaining = (
+                            (_end_dt - datetime.now(timezone.utc)).total_seconds() / 3600.0
+                        )
+                    except (ValueError, TypeError):
+                        pass
+
+                # Determine filter result
+                question = market.get("question", "Unknown market")
+                if conf < self.min_confidence:
+                    _result = f"FILTERED (score {conf} < {self.min_confidence})"
+                elif net_edge < 0.005:
+                    _result = f"FILTERED (edge {net_edge:.1%} < 0.5%)"
+                else:
+                    _result = "SIGNAL"
+
+                logger.info(
+                    "\U0001f50d LateRes candidate: %s | side=%s | price=%.3f | "
+                    "score=%d/100 | edge=%.1f%% | time_to_end=%.1fh | RESULT: %s",
+                    question[:50], side, best_price,
+                    conf, net_edge * 100, _hours_remaining, _result,
+                )
+
                 if conf < self.min_confidence:
                     continue
 
-                # Calculate edge
-                expected_return, net_edge = calculate_edge(best_price, self.TAKER_FEE)
                 if net_edge < 0.005:  # Minimum 0.5% net edge
                     continue
 
@@ -688,8 +723,6 @@ class LateResolutionAgent:
                     or market.get("end_date")
                     or "unknown"
                 )
-
-                question = market.get("question", "Unknown market")
 
                 signal = LateResSignal(
                     market_id=market_id,
